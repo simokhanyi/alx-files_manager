@@ -2,6 +2,9 @@ import { ObjectId } from 'mongodb';
 import bcrypt from 'bcrypt';
 import dbClient from '../utils/db';
 import redisClient from '../utils/redis';
+import Queue from 'bull'; // Import Bull for queue management
+
+const userQueue = new Queue('userQueue'); // Create Bull queue named 'userQueue'
 
 class UsersController {
   static async postNew(req, res) {
@@ -41,6 +44,9 @@ class UsersController {
       // Insert the new user into the database
       const result = await usersCollection.insertOne(newUser);
 
+      // Add job to Bull queue to send welcome email
+      await userQueue.add('sendWelcomeEmail', { userId: result.insertedId });
+
       // Return the newly created user with only email and id
       return res.status(201).json({
         id: result.insertedId,
@@ -67,7 +73,7 @@ class UsersController {
     }
 
     try {
-      const user = await dbClient.db.collection('users').findOne({ _id: new ObjectId(userId) });
+      const user = await dbClient.db.collection('users').findOne({ _id: new ObjectId(userId) });      
 
       if (!user) {
         return res.status(401).send({ error: 'Unauthorized' });
@@ -80,5 +86,24 @@ class UsersController {
     }
   }
 }
+
+// Process the 'sendWelcomeEmail' job from userQueue
+userQueue.process('sendWelcomeEmail', async (job) => {
+  const { userId } = job.data;
+
+  if (!userId) {
+    throw new Error('Missing userId');
+  }
+
+  // Retrieve user details from database
+  const user = await dbClient.db.collection('users').findOne({ _id: new ObjectId(userId) });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Simulate sending welcome email (in real life, use a service like Mailgun)
+  console.log(`Welcome ${user.email}!`);
+});
 
 export default UsersController;
